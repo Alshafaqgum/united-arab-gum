@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useLanguage } from '@/lib/i18n';
 
 interface FormData {
@@ -34,6 +34,13 @@ export default function ContactPage() {
   const [errors, setErrors] = useState<FormErrors>({});
   const [submitted, setSubmitted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [submissionError, setSubmissionError] = useState('');
+  const [formLoadedAt, setFormLoadedAt] = useState<number | null>(null);
+  const honeypotRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    setFormLoadedAt(Date.now());
+  }, []);
 
   const validate = (): boolean => {
     const newErrors: FormErrors = {};
@@ -56,10 +63,35 @@ export default function ContactPage() {
     e.preventDefault();
     if (!validate()) return;
     setSubmitting(true);
-    // Simulate async submission (static MVP — no backend)
-    await new Promise((r) => setTimeout(r, 1200));
-    setSubmitting(false);
-    setSubmitted(true);
+    setSubmissionError('');
+
+    try {
+      const response = await fetch('/api/contact', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...formData,
+          companyWebsite: honeypotRef.current?.value ?? '',
+          formLoadedAt,
+        }),
+      });
+
+      const result = await response.json();
+      if (!response.ok || !result.success) {
+        setSubmissionError(
+          response.status === 429
+            ? t('contact.form.error.rateLimit')
+            : t('contact.form.error.submit')
+        );
+        return;
+      }
+
+      setSubmitted(true);
+    } catch {
+      setSubmissionError(t('contact.form.error.submit'));
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const contactInfo = [
@@ -141,6 +173,16 @@ export default function ContactPage() {
                   </div>
                 ) : (
                   <form onSubmit={handleSubmit} noValidate className="space-y-5">
+                    <input
+                      ref={honeypotRef}
+                      type="text"
+                      name="companyWebsite"
+                      defaultValue=""
+                      tabIndex={-1}
+                      autoComplete="off"
+                      aria-hidden="true"
+                      className="hidden"
+                    />
                     {/* Name + Email row */}
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
                       <div>
@@ -223,7 +265,7 @@ export default function ContactPage() {
 
                     <button
                       type="submit"
-                      disabled={submitting}
+                      disabled={submitting || formLoadedAt === null}
                       className="w-full btn-primary py-3 text-sm disabled:opacity-60 disabled:cursor-not-allowed"
                     >
                       {submitting ? (
@@ -232,12 +274,17 @@ export default function ContactPage() {
                             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                             <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                           </svg>
-                          Sending…
+                          {t('contact.form.sending')}
                         </span>
                       ) : (
                         t('contact.form.submit')
                       )}
                     </button>
+                    {submissionError && (
+                      <p role="alert" className="text-sm text-red-600 text-center">
+                        {submissionError}
+                      </p>
+                    )}
                   </form>
                 )}
               </div>
